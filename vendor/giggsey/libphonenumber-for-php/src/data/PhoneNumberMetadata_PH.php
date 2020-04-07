@@ -14,7 +14,7 @@
 return array (
   'generalDesc' => 
   array (
-    'NationalNumberPattern' => '(?:1800\\d{2,4}|2|[89]\\d{4})\\d{5}|[3-8]\\d{8}|[28]\\d{7}',
+    'NationalNumberPattern' => '1800\\d{7,9}|(?:2|[89]\\d{4})\\d{5}|[2-8]\\d{8}|[28]\\d{7}',
     'PossibleLength' => 
     array (
       0 => 6,
@@ -27,13 +27,14 @@ return array (
     ),
     'PossibleLengthLocalOnly' => 
     array (
-      0 => 5,
-      1 => 7,
+      0 => 4,
+      1 => 5,
+      2 => 7,
     ),
   ),
   'fixedLine' => 
   array (
-    'NationalNumberPattern' => '2\\d{5}(?:\\d{2})?|(?:3[2-68]|4[2-9]|5[2-6]|6[2-58]|7[24578]|8[2-8])\\d{7}|88(?:22\\d{6}|42\\d{4})',
+    'NationalNumberPattern' => '(?:(?:2[3-8]|3[2-68]|4[2-9]|5[2-6]|6[2-58]|7[24578])\\d{3}|88(?:22\\d\\d|42))\\d{4}|2\\d{5}(?:\\d{2})?|8[2-8]\\d{7}',
     'ExampleNumber' => '21234567',
     'PossibleLength' => 
     array (
@@ -44,13 +45,14 @@ return array (
     ),
     'PossibleLengthLocalOnly' => 
     array (
-      0 => 5,
-      1 => 7,
+      0 => 4,
+      1 => 5,
+      2 => 7,
     ),
   ),
   'mobile' => 
   array (
-    'NationalNumberPattern' => '(?:81[37]|9(?:0[5-9]|1[024-9]|2[0-35-9]|3[02-9]|4[235-9]|5[056]|6[5-7]|7[34-79]|89|9[4-9]))\\d{7}',
+    'NationalNumberPattern' => '(?:81[37]|9(?:0[5-9]|1[0-24-9]|2[0-35-9]|[35]\\d|4[235-9]|6[0-25-8]|7[1-9]|8[189]|9[4-9]))\\d{7}',
     'ExampleNumber' => '9051234567',
     'PossibleLength' => 
     array (
@@ -164,8 +166,8 @@ return array (
   array (
     0 => 
     array (
-      'pattern' => '(2)(\\d{3})(\\d{4})',
-      'format' => '$1 $2 $3',
+      'pattern' => '(\\d)(\\d{5})',
+      'format' => '$1 $2',
       'leadingDigitsPatterns' => 
       array (
         0 => '2',
@@ -176,8 +178,8 @@ return array (
     ),
     1 => 
     array (
-      'pattern' => '(2)(\\d{5})',
-      'format' => '$1 $2',
+      'pattern' => '(\\d)(\\d{3})(\\d{4})',
+      'format' => '$1 $2 $3',
       'leadingDigitsPatterns' => 
       array (
         0 => '2',
@@ -192,7 +194,7 @@ return array (
       'format' => '$1 $2',
       'leadingDigitsPatterns' => 
       array (
-        0 => '3(?:23|39|46)|4(?:2[3-6]|[35]9|4[26]|76)|5(?:22|44)|642|8(?:62|8[245])',
+        0 => '3(?:23|39|46)|4(?:2[3-6]|[35]9|4[26]|76)|544|88[245]|(?:52|64|86)2',
         1 => '3(?:230|397|461)|4(?:2(?:35|[46]4|51)|396|4(?:22|63)|59[347]|76[15])|5(?:221|446)|642[23]|8(?:622|8(?:[24]2|5[13]))',
       ),
       'nationalPrefixFormattingRule' => '(0$1)',
@@ -214,11 +216,11 @@ return array (
     ),
     4 => 
     array (
-      'pattern' => '([3-8]\\d)(\\d{3})(\\d{4})',
+      'pattern' => '(\\d)(\\d{4})(\\d{4})',
       'format' => '$1 $2 $3',
       'leadingDigitsPatterns' => 
       array (
-        0 => '[3-8]',
+        0 => '2',
       ),
       'nationalPrefixFormattingRule' => '(0$1)',
       'domesticCarrierCodeFormattingRule' => '',
@@ -226,37 +228,47 @@ return array (
     ),
     5 => 
     array (
-      'pattern' => '(\\d{3})(\\d{3})(\\d{4})',
+      'pattern' => '(\\d{2})(\\d{3})(\\d{4})',
       'format' => '$1 $2 $3',
       'leadingDigitsPatterns' => 
       array (
-        0 => '81|9',
+        0 => '[3-7]|8[2-8]',
       ),
-      'nationalPrefixFormattingRule' => '0$1',
+      'nationalPrefixFormattingRule' => '(0$1)',
       'domesticCarrierCodeFormattingRule' => '',
       'nationalPrefixOptionalWhenFormatting' => false,
     ),
     6 => 
     array (
-      'pattern' => '(1800)(\\d{3})(\\d{4})',
+      'pattern' => '(\\d{3})(\\d{3})(\\d{4})',
       'format' => '$1 $2 $3',
       'leadingDigitsPatterns' => 
       array (
-        0 => '180',
-        1 => '1800',
+        0 => '[89]',
       ),
-      'nationalPrefixFormattingRule' => '',
+      'nationalPrefixFormattingRule' => '0$1',
       'domesticCarrierCodeFormattingRule' => '',
       'nationalPrefixOptionalWhenFormatting' => false,
     ),
     7 => 
     array (
-      'pattern' => '(1800)(\\d{1,2})(\\d{3})(\\d{4})',
+      'pattern' => '(\\d{4})(\\d{3})(\\d{4})',
+      'format' => '$1 $2 $3',
+      'leadingDigitsPatterns' => 
+      array (
+        0 => '1',
+      ),
+      'nationalPrefixFormattingRule' => '',
+      'domesticCarrierCodeFormattingRule' => '',
+      'nationalPrefixOptionalWhenFormatting' => false,
+    ),
+    8 => 
+    array (
+      'pattern' => '(\\d{4})(\\d{1,2})(\\d{3})(\\d{4})',
       'format' => '$1 $2 $3 $4',
       'leadingDigitsPatterns' => 
       array (
-        0 => '180',
-        1 => '1800',
+        0 => '1',
       ),
       'nationalPrefixFormattingRule' => '',
       'domesticCarrierCodeFormattingRule' => '',

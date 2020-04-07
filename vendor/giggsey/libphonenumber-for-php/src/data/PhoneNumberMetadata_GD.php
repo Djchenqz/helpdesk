@@ -26,7 +26,7 @@ return array (
   ),
   'fixedLine' => 
   array (
-    'NationalNumberPattern' => '473(?:2(?:3[0-2]|69)|3(?:2[89]|86)|4(?:[06]8|3[5-9]|4[0-49]|5[5-79]|68|73|90)|63[68]|7(?:58|84)|800|938)\\d{4}',
+    'NationalNumberPattern' => '473(?:2(?:3[0-2]|69)|3(?:2[89]|86)|4(?:[06]8|3[5-9]|4[0-49]|5[5-79]|73|90)|63[68]|7(?:58|84)|800|938)\\d{4}',
     'ExampleNumber' => '4732691234',
     'PossibleLength' => 
     array (
@@ -82,7 +82,7 @@ return array (
   ),
   'personalNumber' => 
   array (
-    'NationalNumberPattern' => '5(?:00|2[12]|33|44|66|77|88)[2-9]\\d{6}',
+    'NationalNumberPattern' => '52(?:35(?:[02-46-9]\\d|1[02-9]|5[0-46-9])|45(?:[034]\\d|1[02-9]|2[024-9]|5[0-46-9]))\\d{4}|52(?:3[2-46-9]|4[2-4])(?:[02-9]\\d|1[02-9])\\d{4}|5(?:00|2[12]|33|44|66|77|88)[2-9]\\d{6}',
     'ExampleNumber' => '5002345678',
     'PossibleLength' => 
     array (
@@ -145,7 +145,8 @@ return array (
   'countryCode' => 1,
   'internationalPrefix' => '011',
   'nationalPrefix' => '1',
-  'nationalPrefixForParsing' => '1',
+  'nationalPrefixForParsing' => '1|([2-9]\\d{6})$',
+  'nationalPrefixTransformRule' => '473$1',
   'sameMobileAndFixedLinePattern' => false,
   'numberFormat' => 
   array (
@@ -156,5 +157,5 @@ return array (
   'mainCountryForCode' => false,
   'leadingDigits' => '473',
   'leadingZeroPossible' => false,
-  'mobileNumberPortableRegion' => false,
+  'mobileNumberPortableRegion' => true,
 );

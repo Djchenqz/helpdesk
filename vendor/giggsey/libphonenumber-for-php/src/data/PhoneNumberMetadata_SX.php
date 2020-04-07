@@ -14,7 +14,7 @@
 return array (
   'generalDesc' => 
   array (
-    'NationalNumberPattern' => '(?:(?:[58]\\d\\d|900)\\d|7215)\\d{6}',
+    'NationalNumberPattern' => '7215\\d{6}|(?:[58]\\d\\d|900)\\d{7}',
     'PossibleLength' => 
     array (
       0 => 10,
@@ -82,7 +82,7 @@ return array (
   ),
   'personalNumber' => 
   array (
-    'NationalNumberPattern' => '5(?:00|2[12]|33|44|66|77|88)[2-9]\\d{6}',
+    'NationalNumberPattern' => '52(?:35(?:[02-46-9]\\d|1[02-9]|5[0-46-9])|45(?:[034]\\d|1[02-9]|2[024-9]|5[0-46-9]))\\d{4}|52(?:3[2-46-9]|4[2-4])(?:[02-9]\\d|1[02-9])\\d{4}|5(?:00|2[12]|33|44|66|77|88)[2-9]\\d{6}',
     'ExampleNumber' => '5002345678',
     'PossibleLength' => 
     array (
@@ -145,7 +145,8 @@ return array (
   'countryCode' => 1,
   'internationalPrefix' => '011',
   'nationalPrefix' => '1',
-  'nationalPrefixForParsing' => '1',
+  'nationalPrefixForParsing' => '1|(5\\d{6})$',
+  'nationalPrefixTransformRule' => '721$1',
   'sameMobileAndFixedLinePattern' => false,
   'numberFormat' => 
   array (
@@ -156,5 +157,5 @@ return array (
   'mainCountryForCode' => false,
   'leadingDigits' => '721',
   'leadingZeroPossible' => false,
-  'mobileNumberPortableRegion' => false,
+  'mobileNumberPortableRegion' => true,
 );

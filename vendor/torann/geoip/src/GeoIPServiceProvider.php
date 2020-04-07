@@ -2,6 +2,7 @@
 
 namespace Torann\GeoIP;
 
+use Illuminate\Support\Str;
 use Illuminate\Support\ServiceProvider;
 
 class GeoIPServiceProvider extends ServiceProvider
@@ -18,6 +19,10 @@ class GeoIPServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->registerResources();
             $this->registerGeoIpCommands();
+        }
+
+        if ($this->isLumen() === false) {
+            $this->mergeConfigFrom(__DIR__ . '/../config/geoip.php', 'geoip');
         }
     }
 
@@ -70,6 +75,6 @@ class GeoIPServiceProvider extends ServiceProvider
      */
     protected function isLumen()
     {
-        return str_contains($this->app->version(), 'Lumen') === true;
+        return Str::contains($this->app->version(), 'Lumen') === true;
     }
 }

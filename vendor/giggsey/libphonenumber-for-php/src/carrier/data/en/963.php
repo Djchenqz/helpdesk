@@ -11,7 +11,7 @@
  */
 
 return array (
-  963922 => 'Syriatel',
+  96392 => 'Syriatel',
   96393 => 'Syriatel',
   96394 => 'MTN',
   963950 => 'MTN',
@@ -23,6 +23,7 @@ return array (
   963958 => 'MTN',
   963959 => 'MTN',
   963962 => 'MTN',
+  963963 => 'MTN',
   963964 => 'MTN',
   963965 => 'MTN',
   963966 => 'MTN',

@@ -12,6 +12,7 @@
 namespace Symfony\Component\OptionsResolver;
 
 use Symfony\Component\OptionsResolver\Exception\AccessException;
+use Symfony\Component\OptionsResolver\Exception\InvalidArgumentException;
 use Symfony\Component\OptionsResolver\Exception\InvalidOptionsException;
 use Symfony\Component\OptionsResolver\Exception\MissingOptionsException;
 use Symfony\Component\OptionsResolver\Exception\NoSuchOptionException;
@@ -29,51 +30,68 @@ class OptionsResolver implements Options
     /**
      * The names of all defined options.
      */
-    private $defined = array();
+    private $defined = [];
 
     /**
      * The default option values.
      */
-    private $defaults = array();
+    private $defaults = [];
+
+    /**
+     * A list of closure for nested options.
+     *
+     * @var \Closure[][]
+     */
+    private $nested = [];
 
     /**
      * The names of required options.
      */
-    private $required = array();
+    private $required = [];
 
     /**
      * The resolved option values.
      */
-    private $resolved = array();
+    private $resolved = [];
 
     /**
      * A list of normalizer closures.
      *
-     * @var \Closure[]
+     * @var \Closure[][]
      */
-    private $normalizers = array();
+    private $normalizers = [];
 
     /**
      * A list of accepted values for each option.
      */
-    private $allowedValues = array();
+    private $allowedValues = [];
 
     /**
      * A list of accepted types for each option.
      */
-    private $allowedTypes = array();
+    private $allowedTypes = [];
 
     /**
      * A list of closures for evaluating lazy options.
      */
-    private $lazy = array();
+    private $lazy = [];
 
     /**
      * A list of lazy options whose closure is currently being called.
      *
      * This list helps detecting circular dependencies between lazy options.
      */
-    private $calling = array();
+    private $calling = [];
+
+    /**
+     * A list of deprecated options.
+     */
+    private $deprecated = [];
+
+    /**
+     * The list of options provided by the user.
+     */
+    private $given = [];
 
     /**
      * Whether the instance is locked for reading.
@@ -85,11 +103,13 @@ class OptionsResolver implements Options
      */
     private $locked = false;
 
-    private static $typeAliases = array(
+    private $parentsOptions = [];
+
+    private static $typeAliases = [
         'boolean' => 'bool',
         'integer' => 'int',
         'double' => 'float',
-    );
+    ];
 
     /**
      * Sets the default value of a given option.
@@ -124,6 +144,20 @@ class OptionsResolver implements Options
      * is spread across different locations of your code, such as base and
      * sub-classes.
      *
+     * If you want to define nested options, you can pass a closure with the
+     * following signature:
+     *
+     *     $options->setDefault('database', function (OptionsResolver $resolver) {
+     *         $resolver->setDefined(['dbname', 'host', 'port', 'user', 'pass']);
+     *     }
+     *
+     * To get access to the parent options, add a second argument to the closure's
+     * signature:
+     *
+     *     function (OptionsResolver $resolver, Options $parent) {
+     *         // 'default' === $parent['connection']
+     *     }
+     *
      * @param string $option The name of the option
      * @param mixed  $value  The default value of the option
      *
@@ -154,28 +188,40 @@ class OptionsResolver implements Options
 
                 // Ignore previous lazy options if the closure has no second parameter
                 if (!isset($this->lazy[$option]) || !isset($params[1])) {
-                    $this->lazy[$option] = array();
+                    $this->lazy[$option] = [];
                 }
 
                 // Store closure for later evaluation
                 $this->lazy[$option][] = $value;
                 $this->defined[$option] = true;
 
-                // Make sure the option is processed
-                unset($this->resolved[$option]);
+                // Make sure the option is processed and is not nested anymore
+                unset($this->resolved[$option], $this->nested[$option]);
+
+                return $this;
+            }
+
+            if (isset($params[0]) && null !== ($class = $params[0]->getClass()) && self::class === $class->name && (!isset($params[1]) || (null !== ($class = $params[1]->getClass()) && Options::class === $class->name))) {
+                // Store closure for later evaluation
+                $this->nested[$option][] = $value;
+                $this->defaults[$option] = [];
+                $this->defined[$option] = true;
+
+                // Make sure the option is processed and is not lazy anymore
+                unset($this->resolved[$option], $this->lazy[$option]);
 
                 return $this;
             }
         }
 
-        // This option is not lazy anymore
-        unset($this->lazy[$option]);
+        // This option is not lazy nor nested anymore
+        unset($this->lazy[$option], $this->nested[$option]);
 
         // Yet undefined options can be marked as resolved, because we only need
         // to resolve options with lazy closures, normalizers or validation
         // rules, none of which can exist for undefined options
         // If the option was resolved before, update the resolved value
-        if (!isset($this->defined[$option]) || array_key_exists($option, $this->resolved)) {
+        if (!isset($this->defined[$option]) || \array_key_exists($option, $this->resolved)) {
             $this->resolved[$option] = $value;
         }
 
@@ -215,7 +261,7 @@ class OptionsResolver implements Options
      */
     public function hasDefault($option)
     {
-        return array_key_exists($option, $this->defaults);
+        return \array_key_exists($option, $this->defaults);
     }
 
     /**
@@ -280,7 +326,7 @@ class OptionsResolver implements Options
      */
     public function isMissing($option)
     {
-        return isset($this->required[$option]) && !array_key_exists($option, $this->defaults);
+        return isset($this->required[$option]) && !\array_key_exists($option, $this->defaults);
     }
 
     /**
@@ -348,16 +394,70 @@ class OptionsResolver implements Options
         return array_keys($this->defined);
     }
 
+    public function isNested(string $option): bool
+    {
+        return isset($this->nested[$option]);
+    }
+
+    /**
+     * Deprecates an option, allowed types or values.
+     *
+     * Instead of passing the message, you may also pass a closure with the
+     * following signature:
+     *
+     *     function (Options $options, $value): string {
+     *         // ...
+     *     }
+     *
+     * The closure receives the value as argument and should return a string.
+     * Return an empty string to ignore the option deprecation.
+     *
+     * The closure is invoked when {@link resolve()} is called. The parameter
+     * passed to the closure is the value of the option after validating it
+     * and before normalizing it.
+     *
+     * @param string|\Closure $deprecationMessage
+     */
+    public function setDeprecated(string $option, $deprecationMessage = 'The option "%name%" is deprecated.'): self
+    {
+        if ($this->locked) {
+            throw new AccessException('Options cannot be deprecated from a lazy option or normalizer.');
+        }
+
+        if (!isset($this->defined[$option])) {
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist, defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
+        }
+
+        if (!\is_string($deprecationMessage) && !$deprecationMessage instanceof \Closure) {
+            throw new InvalidArgumentException(sprintf('Invalid type for deprecation message argument, expected string or \Closure, but got "%s".', \gettype($deprecationMessage)));
+        }
+
+        // ignore if empty string
+        if ('' === $deprecationMessage) {
+            return $this;
+        }
+
+        $this->deprecated[$option] = $deprecationMessage;
+
+        // Make sure the option is processed
+        unset($this->resolved[$option]);
+
+        return $this;
+    }
+
+    public function isDeprecated(string $option): bool
+    {
+        return isset($this->deprecated[$option]);
+    }
+
     /**
      * Sets the normalizer for an option.
      *
      * The normalizer should be a closure with the following signature:
      *
-     * ```php
-     * function (Options $options, $value) {
-     *     // ...
-     * }
-     * ```
+     *     function (Options $options, $value) {
+     *         // ...
+     *     }
      *
      * The closure is invoked when {@link resolve()} is called. The closure
      * has access to the resolved values of other options through the passed
@@ -383,14 +483,59 @@ class OptionsResolver implements Options
         }
 
         if (!isset($this->defined[$option])) {
-            throw new UndefinedOptionsException(sprintf(
-                'The option "%s" does not exist. Defined options are: "%s".',
-                $option,
-                implode('", "', array_keys($this->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
         }
 
-        $this->normalizers[$option] = $normalizer;
+        $this->normalizers[$option] = [$normalizer];
+
+        // Make sure the option is processed
+        unset($this->resolved[$option]);
+
+        return $this;
+    }
+
+    /**
+     * Adds a normalizer for an option.
+     *
+     * The normalizer should be a closure with the following signature:
+     *
+     *     function (Options $options, $value): mixed {
+     *         // ...
+     *     }
+     *
+     * The closure is invoked when {@link resolve()} is called. The closure
+     * has access to the resolved values of other options through the passed
+     * {@link Options} instance.
+     *
+     * The second parameter passed to the closure is the value of
+     * the option.
+     *
+     * The resolved option value is set to the return value of the closure.
+     *
+     * @param string   $option       The option name
+     * @param \Closure $normalizer   The normalizer
+     * @param bool     $forcePrepend If set to true, prepend instead of appending
+     *
+     * @return $this
+     *
+     * @throws UndefinedOptionsException If the option is undefined
+     * @throws AccessException           If called from a lazy option or normalizer
+     */
+    public function addNormalizer(string $option, \Closure $normalizer, bool $forcePrepend = false): self
+    {
+        if ($this->locked) {
+            throw new AccessException('Normalizers cannot be set from a lazy option or normalizer.');
+        }
+
+        if (!isset($this->defined[$option])) {
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
+        }
+
+        if ($forcePrepend) {
+            array_unshift($this->normalizers[$option], $normalizer);
+        } else {
+            $this->normalizers[$option][] = $normalizer;
+        }
 
         // Make sure the option is processed
         unset($this->resolved[$option]);
@@ -426,14 +571,10 @@ class OptionsResolver implements Options
         }
 
         if (!isset($this->defined[$option])) {
-            throw new UndefinedOptionsException(sprintf(
-                'The option "%s" does not exist. Defined options are: "%s".',
-                $option,
-                implode('", "', array_keys($this->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
         }
 
-        $this->allowedValues[$option] = \is_array($allowedValues) ? $allowedValues : array($allowedValues);
+        $this->allowedValues[$option] = \is_array($allowedValues) ? $allowedValues : [$allowedValues];
 
         // Make sure the option is processed
         unset($this->resolved[$option]);
@@ -471,15 +612,11 @@ class OptionsResolver implements Options
         }
 
         if (!isset($this->defined[$option])) {
-            throw new UndefinedOptionsException(sprintf(
-                'The option "%s" does not exist. Defined options are: "%s".',
-                $option,
-                implode('", "', array_keys($this->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
         }
 
         if (!\is_array($allowedValues)) {
-            $allowedValues = array($allowedValues);
+            $allowedValues = [$allowedValues];
         }
 
         if (!isset($this->allowedValues[$option])) {
@@ -516,11 +653,7 @@ class OptionsResolver implements Options
         }
 
         if (!isset($this->defined[$option])) {
-            throw new UndefinedOptionsException(sprintf(
-                'The option "%s" does not exist. Defined options are: "%s".',
-                $option,
-                implode('", "', array_keys($this->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
         }
 
         $this->allowedTypes[$option] = (array) $allowedTypes;
@@ -555,11 +688,7 @@ class OptionsResolver implements Options
         }
 
         if (!isset($this->defined[$option])) {
-            throw new UndefinedOptionsException(sprintf(
-                'The option "%s" does not exist. Defined options are: "%s".',
-                $option,
-                implode('", "', array_keys($this->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
         }
 
         if (!isset($this->allowedTypes[$option])) {
@@ -612,14 +741,16 @@ class OptionsResolver implements Options
             throw new AccessException('Options cannot be cleared from a lazy option or normalizer.');
         }
 
-        $this->defined = array();
-        $this->defaults = array();
-        $this->required = array();
-        $this->resolved = array();
-        $this->lazy = array();
-        $this->normalizers = array();
-        $this->allowedTypes = array();
-        $this->allowedValues = array();
+        $this->defined = [];
+        $this->defaults = [];
+        $this->nested = [];
+        $this->required = [];
+        $this->resolved = [];
+        $this->lazy = [];
+        $this->normalizers = [];
+        $this->allowedTypes = [];
+        $this->allowedValues = [];
+        $this->deprecated = [];
 
         return $this;
     }
@@ -648,7 +779,7 @@ class OptionsResolver implements Options
      * @throws NoSuchOptionException     If a lazy option reads an unavailable option
      * @throws AccessException           If called from a lazy option or normalizer
      */
-    public function resolve(array $options = array())
+    public function resolve(array $options = [])
     {
         if ($this->locked) {
             throw new AccessException('Options cannot be resolved from a lazy option or normalizer.');
@@ -664,15 +795,12 @@ class OptionsResolver implements Options
             ksort($clone->defined);
             ksort($diff);
 
-            throw new UndefinedOptionsException(sprintf(
-                (\count($diff) > 1 ? 'The options "%s" do not exist.' : 'The option "%s" does not exist.').' Defined options are: "%s".',
-                implode('", "', array_keys($diff)),
-                implode('", "', array_keys($clone->defined))
-            ));
+            throw new UndefinedOptionsException(sprintf((\count($diff) > 1 ? 'The options "%s" do not exist.' : 'The option "%s" does not exist.').' Defined options are: "%s".', $this->formatOptions(array_keys($diff)), implode('", "', array_keys($clone->defined))));
         }
 
         // Override options set by the user
         foreach ($options as $option => $value) {
+            $clone->given[$option] = true;
             $clone->defaults[$option] = $value;
             unset($clone->resolved[$option], $clone->lazy[$option]);
         }
@@ -683,10 +811,7 @@ class OptionsResolver implements Options
         if (\count($diff) > 0) {
             ksort($diff);
 
-            throw new MissingOptionsException(sprintf(
-                \count($diff) > 1 ? 'The required options "%s" are missing.' : 'The required option "%s" is missing.',
-                implode('", "', array_keys($diff))
-            ));
+            throw new MissingOptionsException(sprintf(\count($diff) > 1 ? 'The required options "%s" are missing.' : 'The required option "%s" is missing.', $this->formatOptions(array_keys($diff))));
         }
 
         // Lock the container
@@ -704,7 +829,8 @@ class OptionsResolver implements Options
     /**
      * Returns the resolved value of an option.
      *
-     * @param string $option The option name
+     * @param string $option             The option name
+     * @param bool   $triggerDeprecation Whether to trigger the deprecation or not (true by default)
      *
      * @return mixed The option value
      *
@@ -716,44 +842,66 @@ class OptionsResolver implements Options
      * @throws OptionDefinitionException If there is a cyclic dependency between
      *                                   lazy options and/or normalizers
      */
-    public function offsetGet($option)
+    public function offsetGet($option/*, bool $triggerDeprecation = true*/)
     {
         if (!$this->locked) {
             throw new AccessException('Array access is only supported within closures of lazy options and normalizers.');
         }
 
+        $triggerDeprecation = 1 === \func_num_args() || func_get_arg(1);
+
         // Shortcut for resolved options
-        if (array_key_exists($option, $this->resolved)) {
+        if (isset($this->resolved[$option]) || \array_key_exists($option, $this->resolved)) {
+            if ($triggerDeprecation && isset($this->deprecated[$option]) && (isset($this->given[$option]) || $this->calling) && \is_string($this->deprecated[$option])) {
+                @trigger_error(strtr($this->deprecated[$option], ['%name%' => $option]), E_USER_DEPRECATED);
+            }
+
             return $this->resolved[$option];
         }
 
         // Check whether the option is set at all
-        if (!array_key_exists($option, $this->defaults)) {
+        if (!isset($this->defaults[$option]) && !\array_key_exists($option, $this->defaults)) {
             if (!isset($this->defined[$option])) {
-                throw new NoSuchOptionException(sprintf(
-                    'The option "%s" does not exist. Defined options are: "%s".',
-                    $option,
-                    implode('", "', array_keys($this->defined))
-                ));
+                throw new NoSuchOptionException(sprintf('The option "%s" does not exist. Defined options are: "%s".', $this->formatOptions([$option]), implode('", "', array_keys($this->defined))));
             }
 
-            throw new NoSuchOptionException(sprintf(
-                'The optional option "%s" has no value set. You should make sure it is set with "isset" before reading it.',
-                $option
-            ));
+            throw new NoSuchOptionException(sprintf('The optional option "%s" has no value set. You should make sure it is set with "isset" before reading it.', $this->formatOptions([$option])));
         }
 
         $value = $this->defaults[$option];
+
+        // Resolve the option if it is a nested definition
+        if (isset($this->nested[$option])) {
+            // If the closure is already being called, we have a cyclic dependency
+            if (isset($this->calling[$option])) {
+                throw new OptionDefinitionException(sprintf('The options "%s" have a cyclic dependency.', $this->formatOptions(array_keys($this->calling))));
+            }
+
+            if (!\is_array($value)) {
+                throw new InvalidOptionsException(sprintf('The nested option "%s" with value %s is expected to be of type array, but is of type "%s".', $this->formatOptions([$option]), $this->formatValue($value), $this->formatTypeOf($value)));
+            }
+
+            // The following section must be protected from cyclic calls.
+            $this->calling[$option] = true;
+            try {
+                $resolver = new self();
+                $resolver->parentsOptions = $this->parentsOptions;
+                $resolver->parentsOptions[] = $option;
+                foreach ($this->nested[$option] as $closure) {
+                    $closure($resolver, $this);
+                }
+                $value = $resolver->resolve($value);
+            } finally {
+                unset($this->calling[$option]);
+            }
+        }
 
         // Resolve the option if the default value is lazily evaluated
         if (isset($this->lazy[$option])) {
             // If the closure is already being called, we have a cyclic
             // dependency
             if (isset($this->calling[$option])) {
-                throw new OptionDefinitionException(sprintf(
-                    'The options "%s" have a cyclic dependency.',
-                    implode('", "', array_keys($this->calling))
-                ));
+                throw new OptionDefinitionException(sprintf('The options "%s" have a cyclic dependency.', $this->formatOptions(array_keys($this->calling))));
             }
 
             // The following section must be protected from cyclic
@@ -773,11 +921,11 @@ class OptionsResolver implements Options
 
         // Validate the type of the resolved option
         if (isset($this->allowedTypes[$option])) {
-            $valid = false;
-            $invalidTypes = array();
+            $valid = true;
+            $invalidTypes = [];
 
             foreach ($this->allowedTypes[$option] as $type) {
-                $type = isset(self::$typeAliases[$type]) ? self::$typeAliases[$type] : $type;
+                $type = self::$typeAliases[$type] ?? $type;
 
                 if ($valid = $this->verifyTypes($type, $value, $invalidTypes)) {
                     break;
@@ -785,20 +933,25 @@ class OptionsResolver implements Options
             }
 
             if (!$valid) {
-                $keys = array_keys($invalidTypes);
+                $fmtActualValue = $this->formatValue($value);
+                $fmtAllowedTypes = implode('" or "', $this->allowedTypes[$option]);
+                $fmtProvidedTypes = implode('|', array_keys($invalidTypes));
+                $allowedContainsArrayType = \count(array_filter($this->allowedTypes[$option], static function ($item) {
+                    return '[]' === substr(self::$typeAliases[$item] ?? $item, -2);
+                })) > 0;
 
-                if (1 === \count($keys) && '[]' === substr($keys[0], -2)) {
-                    throw new InvalidOptionsException(sprintf('The option "%s" with value %s is expected to be of type "%s", but one of the elements is of type "%s".', $option, $this->formatValue($value), implode('" or "', $this->allowedTypes[$option]), $keys[0]));
+                if (\is_array($value) && $allowedContainsArrayType) {
+                    throw new InvalidOptionsException(sprintf('The option "%s" with value %s is expected to be of type "%s", but one of the elements is of type "%s".', $this->formatOptions([$option]), $fmtActualValue, $fmtAllowedTypes, $fmtProvidedTypes));
                 }
 
-                throw new InvalidOptionsException(sprintf('The option "%s" with value %s is expected to be of type "%s", but is of type "%s".', $option, $this->formatValue($value), implode('" or "', $this->allowedTypes[$option]), implode('|', array_keys($invalidTypes))));
+                throw new InvalidOptionsException(sprintf('The option "%s" with value %s is expected to be of type "%s", but is of type "%s".', $this->formatOptions([$option]), $fmtActualValue, $fmtAllowedTypes, $fmtProvidedTypes));
             }
         }
 
         // Validate the value of the resolved option
         if (isset($this->allowedValues[$option])) {
             $success = false;
-            $printableAllowedValues = array();
+            $printableAllowedValues = [];
 
             foreach ($this->allowedValues[$option] as $allowedValue) {
                 if ($allowedValue instanceof \Closure) {
@@ -809,7 +962,9 @@ class OptionsResolver implements Options
 
                     // Don't include closures in the exception message
                     continue;
-                } elseif ($value === $allowedValue) {
+                }
+
+                if ($value === $allowedValue) {
                     $success = true;
                     break;
                 }
@@ -835,18 +990,39 @@ class OptionsResolver implements Options
             }
         }
 
+        // Check whether the option is deprecated
+        // and it is provided by the user or is being called from a lazy evaluation
+        if ($triggerDeprecation && isset($this->deprecated[$option]) && (isset($this->given[$option]) || ($this->calling && \is_string($this->deprecated[$option])))) {
+            $deprecationMessage = $this->deprecated[$option];
+
+            if ($deprecationMessage instanceof \Closure) {
+                // If the closure is already being called, we have a cyclic dependency
+                if (isset($this->calling[$option])) {
+                    throw new OptionDefinitionException(sprintf('The options "%s" have a cyclic dependency.', $this->formatOptions(array_keys($this->calling))));
+                }
+
+                $this->calling[$option] = true;
+                try {
+                    if (!\is_string($deprecationMessage = $deprecationMessage($this, $value))) {
+                        throw new InvalidOptionsException(sprintf('Invalid type for deprecation message, expected string but got "%s", return an empty string to ignore.', \gettype($deprecationMessage)));
+                    }
+                } finally {
+                    unset($this->calling[$option]);
+                }
+            }
+
+            if ('' !== $deprecationMessage) {
+                @trigger_error(strtr($deprecationMessage, ['%name%' => $option]), E_USER_DEPRECATED);
+            }
+        }
+
         // Normalize the validated option
         if (isset($this->normalizers[$option])) {
             // If the closure is already being called, we have a cyclic
             // dependency
             if (isset($this->calling[$option])) {
-                throw new OptionDefinitionException(sprintf(
-                    'The options "%s" have a cyclic dependency.',
-                    implode('", "', array_keys($this->calling))
-                ));
+                throw new OptionDefinitionException(sprintf('The options "%s" have a cyclic dependency.', $this->formatOptions(array_keys($this->calling))));
             }
-
-            $normalizer = $this->normalizers[$option];
 
             // The following section must be protected from cyclic
             // calls. Set $calling for the current $option to detect a cyclic
@@ -854,7 +1030,9 @@ class OptionsResolver implements Options
             // BEGIN
             $this->calling[$option] = true;
             try {
-                $value = $normalizer($this, $value);
+                foreach ($this->normalizers[$option] as $normalizer) {
+                    $value = $normalizer($this, $value);
+                }
             } finally {
                 unset($this->calling[$option]);
             }
@@ -867,58 +1045,30 @@ class OptionsResolver implements Options
         return $value;
     }
 
-    private function verifyTypes(string $type, $value, array &$invalidTypes): bool
+    private function verifyTypes(string $type, $value, array &$invalidTypes, int $level = 0): bool
     {
         if (\is_array($value) && '[]' === substr($type, -2)) {
-            return $this->verifyArrayType($type, $value, $invalidTypes);
+            $type = substr($type, 0, -2);
+            $valid = true;
+
+            foreach ($value as $val) {
+                if (!$this->verifyTypes($type, $val, $invalidTypes, $level + 1)) {
+                    $valid = false;
+                }
+            }
+
+            return $valid;
         }
 
-        if (self::isValueValidType($type, $value)) {
+        if (('null' === $type && null === $value) || (\function_exists($func = 'is_'.$type) && $func($value)) || $value instanceof $type) {
             return true;
         }
 
-        if (!$invalidTypes) {
-            $invalidTypes[$this->formatTypeOf($value, null)] = true;
+        if (!$invalidTypes || $level > 0) {
+            $invalidTypes[$this->formatTypeOf($value)] = true;
         }
 
         return false;
-    }
-
-    private function verifyArrayType(string $type, array $value, array &$invalidTypes, int $level = 0): bool
-    {
-        $type = substr($type, 0, -2);
-
-        $suffix = '[]';
-        while (\strlen($suffix) <= $level * 2) {
-            $suffix .= '[]';
-        }
-
-        if ('[]' === substr($type, -2)) {
-            $success = true;
-            foreach ($value as $item) {
-                if (!\is_array($item)) {
-                    $invalidTypes[$this->formatTypeOf($item, null).$suffix] = true;
-
-                    return false;
-                }
-
-                if (!$this->verifyArrayType($type, $item, $invalidTypes, $level + 1)) {
-                    $success = false;
-                }
-            }
-
-            return $success;
-        }
-
-        foreach ($value as $item) {
-            if (!self::isValueValidType($type, $item)) {
-                $invalidTypes[$this->formatTypeOf($item, $type).$suffix] = $value;
-
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**
@@ -938,7 +1088,7 @@ class OptionsResolver implements Options
             throw new AccessException('Array access is only supported within closures of lazy options and normalizers.');
         }
 
-        return array_key_exists($option, $this->defaults);
+        return \array_key_exists($option, $this->defaults);
     }
 
     /**
@@ -984,40 +1134,13 @@ class OptionsResolver implements Options
     /**
      * Returns a string representation of the type of the value.
      *
-     * This method should be used if you pass the type of a value as
-     * message parameter to a constraint violation. Note that such
-     * parameters should usually not be included in messages aimed at
-     * non-technical people.
-     *
      * @param mixed $value The value to return the type of
+     *
+     * @return string The type of the value
      */
-    private function formatTypeOf($value, ?string $type): string
+    private function formatTypeOf($value): string
     {
-        $suffix = '';
-
-        if (null !== $type && '[]' === substr($type, -2)) {
-            $suffix = '[]';
-            $type = substr($type, 0, -2);
-            while ('[]' === substr($type, -2)) {
-                $type = substr($type, 0, -2);
-                $value = array_shift($value);
-                if (!\is_array($value)) {
-                    break;
-                }
-                $suffix .= '[]';
-            }
-
-            if (\is_array($value)) {
-                $subTypes = array();
-                foreach ($value as $val) {
-                    $subTypes[$this->formatTypeOf($val, null)] = true;
-                }
-
-                return implode('|', array_keys($subTypes)).$suffix;
-            }
-        }
-
-        return (\is_object($value) ? \get_class($value) : \gettype($value)).$suffix;
+        return \is_object($value) ? \get_class($value) : \gettype($value);
     }
 
     /**
@@ -1079,21 +1202,19 @@ class OptionsResolver implements Options
         return implode(', ', $values);
     }
 
-    private static function isValueValidType(string $type, $value): bool
+    private function formatOptions(array $options): string
     {
-        return (\function_exists($isFunction = 'is_'.$type) && $isFunction($value)) || $value instanceof $type;
-    }
-
-    private function getInvalidValues(array $arrayValues, string $type): array
-    {
-        $invalidValues = array();
-
-        foreach ($arrayValues as $key => $value) {
-            if (!self::isValueValidType($type, $value)) {
-                $invalidValues[$key] = $value;
+        if ($this->parentsOptions) {
+            $prefix = array_shift($this->parentsOptions);
+            if ($this->parentsOptions) {
+                $prefix .= sprintf('[%s]', implode('][', $this->parentsOptions));
             }
+
+            $options = array_map(static function (string $option) use ($prefix): string {
+                return sprintf('%s[%s]', $prefix, $option);
+            }, $options);
         }
 
-        return $invalidValues;
+        return implode('", "', $options);
     }
 }
